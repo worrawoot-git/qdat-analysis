@@ -7,6 +7,7 @@ import matplotlib as mpl
 from wordcloud import WordCloud
 from io import BytesIO
 from docx import Document
+import networkx as nx  # สำหรับทำ Network Analysis
 
 # --- 1. ตั้งค่าการแสดงผลภาษาไทย ---
 font_path = "Kanit-Regular.ttf" 
@@ -15,149 +16,127 @@ def setup_font():
     try:
         mpl.font_manager.fontManager.addfont(font_path)
         prop = mpl.font_manager.FontProperties(fname=font_path)
-        mpl.rc('font', family=prop.get_name())
+        mpl.rc('font', family=prop.get_name(), size=12)
         mpl.rcParams['axes.unicode_minus'] = False 
-        return True
+        return prop
     except:
-        return False
+        return None
 
-# --- 2. ฟังก์ชันวิเคราะห์อารมณ์แบบผสมผสาน ---
+# --- 2. ฟังก์ชันวิเคราะห์อารมณ์ ---
 def analyze_sentiment_thai(text):
-    pos_words = ['ดี', 'เห็นด้วย', 'ภูมิใจ', 'สำเร็จ', 'ความสุข', 'พัฒนา', 'ประโยชน์', 'ยั่งยืน', 'พอเพียง', 'ประหยัด']
-    neg_words = ['ไม่ดี', 'ปัญหา', 'แย่', 'ยากลำบาก', 'ขาดแคลน', 'อุปสรรค', 'หนี้สิน', 'เดือดร้อน', 'เสียดาย']
+    pos_words = ['ดี', 'เห็นด้วย', 'ภูมิใจ', 'สำเร็จ', 'ความสุข', 'พัฒนา', 'ประโยชน์', 'ยั่งยืน', 'พอเพียง']
+    neg_words = ['ไม่ดี', 'ปัญหา', 'แย่', 'ยากลำบาก', 'ขาดแคลน', 'อุปสรรค', 'หนี้สิน', 'เดือดร้อน']
     pos_score = sum(1 for w in pos_words if w in text)
     neg_score = sum(1 for w in neg_words if w in text)
-    if pos_score > neg_score: return "บวก (Positive) 😊"
-    elif neg_score > pos_score: return "ลบ (Negative) 😟"
-    else: return "ปกติ / เป็นกลาง 😐"
+    if pos_score > neg_score: return "บวก 😊"
+    elif neg_score > pos_score: return "ลบ 😟"
+    else: return "ปกติ 😐"
 
-# --- 3. ฟังก์ชันสร้างรายงาน MS Word ---
-def create_word_report(filename, sentiment, summary, keywords_df, original_text):
-    doc = Document()
-    doc.add_heading(f'รายงานวิจัย: {filename}', 0)
-    doc.add_heading('1. ผลวิเคราะห์อารมณ์', level=1)
-    doc.add_paragraph(sentiment)
-    doc.add_heading('2. สรุปเนื้อหาสำคัญ', level=1)
-    for s in summary:
-        doc.add_paragraph(s, style='List Bullet')
-    doc.add_heading('3. คำสำคัญที่พบ (Top Keywords)', level=1)
-    table = doc.add_table(rows=1, cols=2)
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'คำสำคัญ'
-    hdr_cells[1].text = 'จำนวนครั้ง'
-    for index, row in keywords_df.iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row['คำ'])
-        row_cells[1].text = str(row['จำนวนครั้ง'])
-    doc.add_heading('4. ตัวอย่างข้อความต้นฉบับ', level=1)
-    doc.add_paragraph(original_text[:1000] + "..." if len(original_text) > 1000 else original_text)
-    bio = BytesIO()
-    doc.save(bio)
-    return bio.getvalue()
+# --- 3. ฟังก์ชันสร้าง Network Analysis ---
+def plot_network(words, font_prop):
+    # สร้าง Co-occurrence (คำที่อยู่ใกล้กันในประโยค)
+    G = nx.Graph()
+    # ดึงคู่คำที่อยู่ติดกัน
+    pairs = []
+    for i in range(len(words)-1):
+        if words[i] != words[i+1]:
+            pairs.append(tuple(sorted((words[i], words[i+1]))))
+    
+    # นับความถี่ของคู่คำ และเลือกเฉพาะคู่ที่พบ 2 ครั้งขึ้นไปเพื่อความสะอาด
+    pair_counts = Counter(pairs).most_common(20)
+    
+    for pair, weight in pair_counts:
+        G.add_edge(pair[0], pair[1], weight=weight)
+    
+    if len(G.nodes) == 0:
+        return None
 
-# --- 4. ฟังก์ชันสร้างไฟล์ Excel สำหรับตารางสรุป ---
-def to_excel(df):
-    output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='openpyxl')
-    df.to_excel(writer, index=False, sheet_name='Sentiment_Summary')
-    writer.close()
-    processed_data = output.getvalue()
-    return processed_data
+    fig, ax = plt.subplots(figsize=(10, 7))
+    pos = nx.spring_layout(G, k=0.5, seed=42)
+    
+    # วาดเส้นเชื่อม
+    weights = [G[u][v]['weight'] for u, v in G.edges()]
+    nx.draw_networkx_edges(G, pos, width=weights, edge_color='skyblue', alpha=0.5)
+    
+    # วาดโหนด
+    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='orange', alpha=0.8)
+    
+    # วาดตัวอักษรไทย
+    for node, (x, y) in pos.items():
+        ax.text(x, y, node, fontproperties=font_prop, fontsize=14, 
+                ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+    
+    plt.axis('off')
+    return fig
 
-# --- 5. การนำเข้า Library ---
+# --- 4. การนำเข้า Library ภาษาไทย ---
 try:
-    from pythainlp.summarize import summarize
     from pythainlp.tokenize import word_tokenize
     from pythainlp.corpus import thai_stopwords
     THAI_READY = True
-except ImportError:
+except:
     THAI_READY = False
 
-st.set_page_config(layout="wide", page_title="Full Research Analysis Tool")
-st.title("📂 ระบบวิเคราะห์งานวิจัยฉบับสมบูรณ์ (All-in-One)")
+st.set_page_config(layout="wide", page_title="Advanced Research Analysis")
+st.title("🕸️ ระบบวิเคราะห์งานวิจัยขั้นสูง (Network Analysis Edition)")
 
 if not THAI_READY:
-    st.error("❌ พบข้อผิดพลาดในการโหลด Library")
+    st.error("❌ Library ไม่พร้อมใช้งาน")
     st.stop()
 
-setup_font()
+font_p = setup_font()
 uploaded_files = st.file_uploader("อัปโหลดไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
 
 if uploaded_files:
-    comparison_list = [] 
-    
+    comparison_list = []
     for file in uploaded_files:
         text = file.read().decode("utf-8")
         tokens = word_tokenize(text, keep_whitespace=False)
-        stop_words = list(thai_stopwords())
-        extra_stop = ['เนาะ', 'นะ', 'ครับ', 'ค่ะ', 'อืม', 'เอ่อ', 'คือ', 'แบบ']
-        stop_words.extend(extra_stop)
+        stop_words = list(thai_stopwords()) + ['เนาะ', 'นะ', 'ครับ', 'ค่ะ', 'คือ', 'แบบ', 'ว่า']
         
-        # กรองคำ: ยาว >= 5 และซ้ำ >= 3
-        filtered_by_length = [t.strip() for t in tokens if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)]
-        word_counts = Counter(filtered_by_length)
-        filtered_final = [word for word in filtered_by_length if word_counts[word] >= 3]
+        # กรองคำตามเงื่อนไข (ยาว >= 5)
+        filtered_words = [t.strip() for t in tokens if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)]
+        word_counts = Counter(filtered_words)
+        # กรองคำซ้ำ >= 3
+        filtered_final = [w for w in filtered_words if word_counts[w] >= 3]
         
         s_label = analyze_sentiment_thai(text)
-        try:
-            brief = summarize(text, n=2)
-        except:
-            brief = ["ไม่สามารถสรุปได้"]
+        comparison_list.append({"ไฟล์": file.name, "อารมณ์": s_label})
 
-        comparison_list.append({
-            "ชื่อไฟล์": file.name,
-            "โทนความรู้สึก": s_label,
-            "คำสำคัญที่เด่นที่สุด": Counter(filtered_final).most_common(1)[0][0] if filtered_final else "ไม่พบ"
-        })
-
-        with st.expander(f"📑 ผลการวิเคราะห์ละเอียด: {file.name}", expanded=True):
-            tab1, tab2 = st.tabs(["📊 สถิติและ Word Cloud", "📄 ข้อความต้นฉบับ"])
+        with st.expander(f"📑 วิเคราะห์เชิงลึก: {file.name}", expanded=True):
+            tab1, tab2, tab3 = st.tabs(["📊 สถิติ", "🕸️ โครงข่ายความสัมพันธ์", "📄 ต้นฉบับ"])
             
             with tab1:
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.subheader("💡 การวิเคราะห์เนื้อหา")
-                    st.write(f"**ความรู้สึก:** {s_label}")
-                    st.write("**สรุปประเด็น:**")
-                    for b in brief: st.write(f"📌 {b}")
-                    
+                    st.write(f"**โทนความรู้สึก:** {s_label}")
                     if filtered_final:
-                        wc = WordCloud(width=800, height=400, background_color="white", regexp=r"[\u0e00-\u0e7f]+", font_path=font_path).generate(" ".join(filtered_final))
-                        fig, ax = plt.subplots()
-                        ax.imshow(wc, interpolation='bilinear')
-                        ax.axis("off")
-                        st.pyplot(fig)
-                        
-                        buf = BytesIO()
-                        fig.savefig(buf, format="png")
-                        st.download_button(label="💾 โหลดรูป Word Cloud (PNG)", data=buf.getvalue(), file_name=f"cloud_{file.name}.png", mime="image/png")
-                
+                        wc = WordCloud(width=600, height=300, background_color="white", regexp=r"[\u0e00-\u0e7f]+", font_path=font_path).generate(" ".join(filtered_final))
+                        fig_wc, ax_wc = plt.subplots()
+                        ax_wc.imshow(wc)
+                        ax_wc.axis("off")
+                        st.pyplot(fig_wc)
                 with c2:
-                    st.subheader("📈 สถิติคำสำคัญ")
-                    final_counts = Counter(filtered_final).most_common(12)
-                    df_counts = pd.DataFrame(final_counts, columns=['คำ', 'จำนวนครั้ง'])
+                    df_counts = pd.DataFrame(Counter(filtered_final).most_common(10), columns=['คำ', 'จำนวน'])
                     st.table(df_counts)
-                    
-                    word_report = create_word_report(file.name, s_label, brief, df_counts, text)
-                    st.download_button(label="📄 โหลดรายงานสรุป (MS Word)", data=word_report, file_name=f"report_{file.name}.docx")
 
             with tab2:
-                st.text_area(label="ข้อความต้นฉบับ", value=text, height=300)
+                st.subheader("โหนดความสัมพันธ์ของคำสำคัญ")
+                st.write("แผนภาพแสดงคำที่มักถูกใช้เชื่อมโยงกันในบทสัมภาษณ์")
+                if len(filtered_words) > 5:
+                    fig_net = plot_network(filtered_words, font_p)
+                    if fig_net:
+                        st.pyplot(fig_net)
+                        # ปุ่มโหลด PNG ของ Network
+                        buf_net = BytesIO()
+                        fig_net.savefig(buf_net, format="png")
+                        st.download_button("💾 ดาวน์โหลดโครงข่าย (PNG)", buf_net.getvalue(), f"network_{file.name}.png")
+                else:
+                    st.warning("ข้อมูลน้อยเกินไปสำหรับการวิเคราะห์โครงข่าย")
 
-    # --- ส่วนสุดท้าย: ตารางเปรียบเทียบรวมพร้อมปุ่มโหลด Excel ---
+            with tab3:
+                st.text_area("ข้อความ", value=text, height=200)
+
     st.divider()
-    st.subheader("📋 ตารางสรุปเปรียบเทียบทุกเคส (Sentiment Analysis Summary)")
-    df_compare = pd.DataFrame(comparison_list)
-    st.table(df_compare)
-    
-    # ปุ่มดาวน์โหลด Excel
-    excel_data = to_excel(df_compare)
-    st.download_button(
-        label="🟢 ดาวน์โหลดตารางสรุปเปรียบเทียบ (Excel)",
-        data=excel_data,
-        file_name="sentiment_summary_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-else:
-    st.info("👋 กรุณาอัปโหลดไฟล์บทสัมภาษณ์เพื่อเริ่มการวิเคราะห์")
+    st.subheader("📋 สรุปทุกเคส")
+    st.table(pd.DataFrame(comparison_list))
