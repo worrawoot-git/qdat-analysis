@@ -1,5 +1,6 @@
 streamlit
-pythainlp
 pandas
-wordcloud
 matplotlib
+wordcloud
+pythainlp>=4.0.0
+pytinysegmenter
