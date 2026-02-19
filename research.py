@@ -3,82 +3,117 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from collections import Counter
 import re
+import matplotlib as mpl
+from wordcloud import WordCloud
 
-# พยายามนำเข้า Library ทีละตัวเพื่อความปลอดภัย
+# --- 1. ตั้งค่าการแสดงผลภาษาไทย (Font Configuration) ---
+# ชื่อไฟล์ต้องตรงกับที่อัปโหลดขึ้น GitHub (Kanit-Regular.ttf)
+font_path = "Kanit-Regular.ttf" 
+
 try:
-    import pythainlp
+    # เพิ่มฟอนต์เข้าไปใน Matplotlib เพื่อให้กราฟอ่านภาษาไทยออก
+    mpl.font_manager.fontManager.addfont(font_path)
+    prop = mpl.font_manager.FontProperties(fname=font_path)
+    mpl.rc('font', family=prop.get_name())
+    # ป้องกันปัญหาสัญลักษณ์เครื่องหมายลบแสดงผลผิดพลาด
+    mpl.rcParams['axes.unicode_minus'] = False 
+except Exception as e:
+    st.warning(f"⚠️ คำเตือน: ระบบหาไฟล์ฟอนต์ {font_path} ไม่พบ กราฟอาจแสดงผลภาษาไทยไม่ได้")
+
+# --- 2. ฟังก์ชันหลักสำหรับวิเคราะห์ภาษาไทย ---
+try:
+    from pythainlp.summarize import summarize
     from pythainlp.tokenize import word_tokenize
     from pythainlp.corpus import thai_stopwords
-    THAI_LIB = True
+    from pythainlp.sentiment import sentiment
+    THAI_READY = True
 except ImportError:
-    THAI_LIB = False
+    THAI_READY = False
 
-st.set_page_config(layout="wide", page_title="Stable Thai Research Tool")
-st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์ (Stable Cloud Version)")
+# --- 3. ส่วนการแสดงผลบนหน้าเว็บ (UI) ---
+st.set_page_config(layout="wide", page_title="Advanced Thai Research Tool")
 
-if not THAI_LIB:
-    st.error("❌ ระบบไม่สามารถติดตั้ง Library ภาษาไทยได้ กรุณากด Reboot App หรือเช็กไฟล์ requirements.txt")
+st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Full Version)")
+st.write("ฟีเจอร์: ภาษาไทยสมบูรณ์ | Word Cloud | วิเคราะห์อารมณ์ | หลายไฟล์")
+
+if not THAI_READY:
+    st.error("❌ พบข้อผิดพลาด: ไม่สามารถติดตั้ง Library ภาษาไทยได้ กรุณาเช็กไฟล์ requirements.txt")
     st.stop()
 
+# ส่วนอัปโหลดไฟล์
 uploaded_files = st.file_uploader("อัปโหลดไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
 
 if uploaded_files:
-    summary_list = []
+    comparison_list = []
+    
     for file in uploaded_files:
+        # อ่านข้อความจากไฟล์
         text = file.read().decode("utf-8")
         
-        with st.expander(f"📑 วิเคราะห์ไฟล์: {file.name}", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            # การตัดคำ
-            tokens = word_tokenize(text, keep_whitespace=False)
-            stop_words = list(thai_stopwords())
-            filtered = [t for t in tokens if t not in stop_words and len(t) > 1 and not re.match(r'[0-9]+', t)]
+        # เตรียมข้อมูลเบื้องต้น
+        tokens = word_tokenize(text, keep_whitespace=False)
+        stop_words = list(thai_stopwords())
+        # กรองคำที่ไม่จำเป็นและตัวเลขออก
+        filtered = [t for t in tokens if t not in stop_words and len(t) > 1 and not re.match(r'[0-9]+', t)]
+        
+        with st.expander(f"📊 วิเคราะห์ไฟล์: {file.name}", expanded=True):
+            col1, col2 = st.columns([1, 1])
             
             with col1:
-                st.subheader("💡 ผลการวิเคราะห์")
+                st.subheader("💡 สรุปและอารมณ์")
                 
-                # 1. วิเคราะห์ Sentiment (แบบดัก Error รายบรรทัด)
+                # วิเคราะห์อารมณ์ (Sentiment)
                 try:
-                    from pythainlp.sentiment import sentiment
                     s_val = sentiment(text)
-                    s_label = "บวก 😊" if s_val == "pos" else "ลบ 😟" if s_val == "neg" else "ปกติ 😐"
+                    s_label = "บวก (Positive) 😊" if s_val == "pos" else "ลบ (Negative) 😟" if s_val == "neg" else "ปกติ (Neutral) 😐"
                 except:
                     s_label = "ไม่รองรับการวิเคราะห์อารมณ์"
                 st.write(f"**โทนความรู้สึกรวม:** {s_label}")
-
-                # 2. สรุปใจความ (แบบดัก Error)
+                
+                # สรุปใจความสำคัญ (Summary)
+                st.write("**สรุปเนื้อหา:**")
                 try:
-                    from pythainlp.summarize import summarize
                     brief = summarize(text, n=2)
-                    st.write("**สรุปเนื้อหา:**")
                     for b in brief: st.write(f"📌 {b}")
                 except:
-                    st.write("**สรุปเนื้อหา:** ไม่สามารถสรุปได้อัตโนมัติ")
+                    st.write("- ไม่สามารถสรุปเนื้อหาได้อัตโนมัติ")
 
-                # 3. Word Cloud
+                # สร้าง Word Cloud ภาษาไทย
+                st.write("**Word Cloud:**")
                 try:
-                    from wordcloud import WordCloud
-                    wc = WordCloud(width=800, height=400, background_color="white", regexp=r"[\u0e00-\u0e7f]+").generate(" ".join(filtered))
-                    fig, ax = plt.subplots()
-                    ax.imshow(wc, interpolation='bilinear')
-                    ax.axis("off")
-                    st.pyplot(fig)
-                except:
-                    st.write("⚠️ ไม่สามารถสร้าง Word Cloud ได้")
+                    wc = WordCloud(
+                        width=800, 
+                        height=400, 
+                        background_color="white", 
+                        regexp=r"[\u0e00-\u0e7f]+", # ดึงเฉพาะตัวอักษรไทย
+                        font_path=font_path
+                    ).generate(" ".join(filtered))
+                    
+                    fig_wc, ax_wc = plt.subplots()
+                    ax_wc.imshow(wc, interpolation='bilinear')
+                    ax_wc.axis("off")
+                    st.pyplot(fig_wc)
+                except Exception as e:
+                    st.write(f"⚠️ ไม่สามารถสร้าง Word Cloud ได้: {e}")
 
             with col2:
-                st.subheader("📊 สถิติคำสำคัญ")
+                st.subheader("📈 สถิติคำสำคัญ")
+                # นับคำสำคัญ 12 อันดับแรก
                 counts = Counter(filtered).most_common(12)
-                df = pd.DataFrame(counts, columns=['คำ', 'จำนวน'])
-                if not df.empty:
-                    st.bar_chart(df.set_index('คำ'))
-                    st.table(df)
+                df_counts = pd.DataFrame(counts, columns=['คำ', 'จำนวนครั้ง'])
+                
+                # แสดงกราฟแท่ง (จะแสดงภาษาไทยได้เพราะตั้งค่า mpl.rc ไว้ด้านบน)
+                st.bar_chart(df_counts.set_index('คำ'))
+                
+                # แสดงตารางข้อมูล
+                st.table(df_counts)
 
-            summary_list.append({"ชื่อไฟล์": file.name, "อารมณ์": s_label})
+            comparison_list.append({"ชื่อไฟล์": file.name, "อารมณ์": s_label, "คำสำคัญหลัก": df_counts['คำ'].iloc[0] if not df_counts.empty else "-"})
 
+    # ส่วนตารางเปรียบเทียบระหว่างเคส
     st.divider()
-    st.subheader("📋 ตารางเปรียบเทียบเคส")
-    st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
+    st.subheader("📋 ตารางสรุปเปรียบเทียบ (Cross-Case Comparison)")
+    st.dataframe(pd.DataFrame(comparison_list), use_container_width=True)
+
 else:
-    st.info("กรุณาอัปโหลดไฟล์บทสัมภาษณ์เพื่อเริ่มการประมวลผล")
+    st.info("👋 ยินดีต้อนรับ! กรุณาอัปโหลดไฟล์ .txt เพื่อเริ่มการวิเคราะห์")
