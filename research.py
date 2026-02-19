@@ -7,7 +7,7 @@ import matplotlib as mpl
 from wordcloud import WordCloud
 from io import BytesIO
 from docx import Document
-import networkx as nx  # สำหรับทำ Network Analysis
+import networkx as nx 
 
 # --- 1. ตั้งค่าการแสดงผลภาษาไทย ---
 font_path = "Kanit-Regular.ttf" 
@@ -34,42 +34,31 @@ def analyze_sentiment_thai(text):
 
 # --- 3. ฟังก์ชันสร้าง Network Analysis ---
 def plot_network(words, font_prop):
-    # สร้าง Co-occurrence (คำที่อยู่ใกล้กันในประโยค)
     G = nx.Graph()
-    # ดึงคู่คำที่อยู่ติดกัน
     pairs = []
     for i in range(len(words)-1):
         if words[i] != words[i+1]:
             pairs.append(tuple(sorted((words[i], words[i+1]))))
     
-    # นับความถี่ของคู่คำ และเลือกเฉพาะคู่ที่พบ 2 ครั้งขึ้นไปเพื่อความสะอาด
     pair_counts = Counter(pairs).most_common(20)
-    
     for pair, weight in pair_counts:
         G.add_edge(pair[0], pair[1], weight=weight)
     
-    if len(G.nodes) == 0:
-        return None
+    if len(G.nodes) == 0: return None
 
     fig, ax = plt.subplots(figsize=(10, 7))
     pos = nx.spring_layout(G, k=0.5, seed=42)
-    
-    # วาดเส้นเชื่อม
     weights = [G[u][v]['weight'] for u, v in G.edges()]
     nx.draw_networkx_edges(G, pos, width=weights, edge_color='skyblue', alpha=0.5)
-    
-    # วาดโหนด
     nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='orange', alpha=0.8)
     
-    # วาดตัวอักษรไทย
     for node, (x, y) in pos.items():
         ax.text(x, y, node, fontproperties=font_prop, fontsize=14, 
                 ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
-    
     plt.axis('off')
     return fig
 
-# --- 4. การนำเข้า Library ภาษาไทย ---
+# --- 4. การนำเข้า Library ---
 try:
     from pythainlp.tokenize import word_tokenize
     from pythainlp.corpus import thai_stopwords
@@ -78,7 +67,7 @@ except:
     THAI_READY = False
 
 st.set_page_config(layout="wide", page_title="Advanced Research Analysis")
-st.title("🕸️ ระบบวิเคราะห์งานวิจัยขั้นสูง (Network Analysis Edition)")
+st.title("🕸️ ระบบวิเคราะห์งานวิจัยขั้นสูง (Full Edition)")
 
 if not THAI_READY:
     st.error("❌ Library ไม่พร้อมใช้งาน")
@@ -94,17 +83,15 @@ if uploaded_files:
         tokens = word_tokenize(text, keep_whitespace=False)
         stop_words = list(thai_stopwords()) + ['เนาะ', 'นะ', 'ครับ', 'ค่ะ', 'คือ', 'แบบ', 'ว่า']
         
-        # กรองคำตามเงื่อนไข (ยาว >= 5)
         filtered_words = [t.strip() for t in tokens if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)]
         word_counts = Counter(filtered_words)
-        # กรองคำซ้ำ >= 3
         filtered_final = [w for w in filtered_words if word_counts[w] >= 3]
         
         s_label = analyze_sentiment_thai(text)
         comparison_list.append({"ไฟล์": file.name, "อารมณ์": s_label})
 
         with st.expander(f"📑 วิเคราะห์เชิงลึก: {file.name}", expanded=True):
-            tab1, tab2, tab3 = st.tabs(["📊 สถิติ", "🕸️ โครงข่ายความสัมพันธ์", "📄 ต้นฉบับ"])
+            tab1, tab2, tab3 = st.tabs(["📊 สถิติ & Word Cloud", "🕸️ โครงข่ายความสัมพันธ์", "📄 ต้นฉบับ"])
             
             with tab1:
                 c1, c2 = st.columns(2)
@@ -116,27 +103,35 @@ if uploaded_files:
                         ax_wc.imshow(wc)
                         ax_wc.axis("off")
                         st.pyplot(fig_wc)
+                        
+                        # --- ปุ่มดาวน์โหลด PNG กลับมาแล้ว ---
+                        buf_wc = BytesIO()
+                        fig_wc.savefig(buf_wc, format="png")
+                        st.download_button(label="💾 ดาวน์โหลด Word Cloud (PNG)", data=buf_wc.getvalue(), file_name=f"cloud_{file.name}.png", mime="image/png")
                 with c2:
                     df_counts = pd.DataFrame(Counter(filtered_final).most_common(10), columns=['คำ', 'จำนวน'])
                     st.table(df_counts)
 
             with tab2:
                 st.subheader("โหนดความสัมพันธ์ของคำสำคัญ")
-                st.write("แผนภาพแสดงคำที่มักถูกใช้เชื่อมโยงกันในบทสัมภาษณ์")
                 if len(filtered_words) > 5:
                     fig_net = plot_network(filtered_words, font_p)
                     if fig_net:
                         st.pyplot(fig_net)
-                        # ปุ่มโหลด PNG ของ Network
-                        buf_net = BytesIO()
-                        fig_net.savefig(buf_net, format="png")
-                        st.download_button("💾 ดาวน์โหลดโครงข่าย (PNG)", buf_net.getvalue(), f"network_{file.name}.png")
                 else:
                     st.warning("ข้อมูลน้อยเกินไปสำหรับการวิเคราะห์โครงข่าย")
 
             with tab3:
-                st.text_area("ข้อความ", value=text, height=200)
+                # --- แสดงตัวอย่างข้อความ 5 ตัวอย่างแรก ---
+                st.subheader("📄 ตัวอย่างข้อความจากไฟล์ (5 ตัวอย่างแรก)")
+                sentences = text.split('\n')
+                sample_text = "\n\n".join([s for s in sentences if s.strip()][:5])
+                st.info(sample_text if sample_text else "ไม่พบข้อความในไฟล์")
+                
+                st.divider()
+                st.write("**ข้อความทั้งหมด:**")
+                st.text_area("Content Viewer", value=text, height=200)
 
     st.divider()
-    st.subheader("📋 สรุปทุกเคส")
+    st.subheader("📋 ตารางสรุปเปรียบเทียบทุกเคส")
     st.table(pd.DataFrame(comparison_list))
