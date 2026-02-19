@@ -2,3 +2,4 @@ streamlit
 pythainlp
 wordcloud
 matplotlib
+pandas
