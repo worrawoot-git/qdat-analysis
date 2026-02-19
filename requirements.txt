@@ -4,3 +4,4 @@ wordcloud
 matplotlib
 pandas
 python-docx
+openpyxl
