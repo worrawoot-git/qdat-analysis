@@ -1,5 +1,5 @@
 streamlit
-pythainlp
-wordcloud
-matplotlib
+pythainlp>=4.0.0
 pandas
+matplotlib
+wordcloud
