@@ -5,6 +5,8 @@ from collections import Counter
 import re
 import matplotlib as mpl
 from wordcloud import WordCloud
+from io import BytesIO
+from docx import Document # ต้องติดตั้ง python-docx
 
 # --- 1. ตั้งค่าการแสดงผลภาษาไทย ---
 font_path = "Kanit-Regular.ttf" 
@@ -21,25 +23,41 @@ def setup_font():
 
 # --- 2. ฟังก์ชันวิเคราะห์อารมณ์แบบผสมผสาน ---
 def analyze_sentiment_thai(text):
-    try:
-        from pythainlp.sentiment import sentiment
-        res = sentiment(text)
-        if res == "pos": return "บวก (Positive) 😊"
-        if res == "neg": return "ลบ (Negative) 😟"
-    except:
-        pass
-
     pos_words = ['ดี', 'เห็นด้วย', 'ภูมิใจ', 'สำเร็จ', 'ความสุข', 'พัฒนา', 'ประโยชน์', 'ยั่งยืน', 'พอเพียง', 'ประหยัด']
     neg_words = ['ไม่ดี', 'ปัญหา', 'แย่', 'ยากลำบาก', 'ขาดแคลน', 'อุปสรรค', 'หนี้สิน', 'เดือดร้อน', 'เสียดาย']
-    
     pos_score = sum(1 for w in pos_words if w in text)
     neg_score = sum(1 for w in neg_words if w in text)
-    
     if pos_score > neg_score: return "ค่อนไปทางบวก 😊"
     elif neg_score > pos_score: return "ค่อนไปทางลบ 😟"
     else: return "ปกติ / เป็นกลาง 😐"
 
-# --- 3. การนำเข้า Library ---
+# --- 3. ฟังก์ชันสร้างไฟล์ MS Word ---
+def create_word_report(filename, sentiment, summary, keywords_df):
+    doc = Document()
+    doc.add_heading(f'รายงานการวิเคราะห์: {filename}', 0)
+    
+    doc.add_heading('ผลวิเคราะห์อารมณ์', level=1)
+    doc.add_paragraph(sentiment)
+    
+    doc.add_heading('สรุปเนื้อหาสำคัญ', level=1)
+    for s in summary:
+        doc.add_paragraph(s, style='List Bullet')
+        
+    doc.add_heading('สถิติคำสำคัญ (Top Keywords)', level=1)
+    table = doc.add_table(rows=1, cols=2)
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'คำสำคัญ'
+    hdr_cells[1].text = 'จำนวนครั้ง'
+    for index, row in keywords_df.iterrows():
+        row_cells = table.add_row().cells
+        row_cells[0].text = str(row['คำ'])
+        row_cells[1].text = str(row['จำนวนครั้ง'])
+        
+    bio = BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+# --- 4. การนำเข้า Library ภาษาไทย ---
 try:
     from pythainlp.summarize import summarize
     from pythainlp.tokenize import word_tokenize
@@ -48,87 +66,62 @@ try:
 except ImportError:
     THAI_READY = False
 
-st.set_page_config(layout="wide", page_title="Professional Thai Research Tool")
-st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Custom Filter Edition)")
+st.set_page_config(layout="wide", page_title="Research Tool with Download")
+st.title("📂 ระบบวิเคราะห์งานวิจัย (Export Edition)")
 
 if not THAI_READY:
-    st.error("❌ พบข้อผิดพลาดในการโหลด Library ภาษาไทย")
+    st.error("❌ พบข้อผิดพลาดในการโหลด Library")
     st.stop()
 
 setup_font()
-
 uploaded_files = st.file_uploader("อัปโหลดไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
 
 if uploaded_files:
-    comparison_data = []
-    
     for file in uploaded_files:
         text = file.read().decode("utf-8")
-        
-        # ตัดคำ
         tokens = word_tokenize(text, keep_whitespace=False)
         stop_words = list(thai_stopwords())
-        extra_stop = ['เนาะ', 'นะ', 'ครับ', 'ค่ะ', 'อืม', 'เอ่อ']
-        stop_words.extend(extra_stop)
         
-        # --- เงื่อนไขใหม่: เลือกคำที่ยาวตั้งแต่ 5 ตัวอักษรขึ้นไป และไม่ใช่ตัวเลข/สัญลักษณ์ ---
-        filtered_by_length = [
-            t.strip() for t in tokens 
-            if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)
-        ]
-        
-        # --- เงื่อนไขใหม่: นับความถี่และเลือกคำที่ซ้ำตั้งแต่ 3 ครั้งขึ้นไป ---
-        word_counts_full = Counter(filtered_by_length)
-        filtered_final = [word for word in filtered_by_length if word_counts_full[word] >= 3]
+        # กรองคำ: ยาว >= 5 และไม่ใช่สัญลักษณ์
+        filtered_by_length = [t.strip() for t in tokens if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)]
+        word_counts = Counter(filtered_by_length)
+        filtered_final = [word for word in filtered_by_length if word_counts[word] >= 3]
         
         with st.expander(f"📊 ผลการวิเคราะห์: {file.name}", expanded=True):
-            col1, col2 = st.columns([1, 1])
+            col1, col2 = st.columns(2)
             
+            s_label = analyze_sentiment_thai(text)
+            try:
+                brief = summarize(text, n=2)
+            except:
+                brief = ["ไม่สามารถสรุปได้"]
+
             with col1:
-                st.subheader("🔍 สรุปข้อมูล")
-                st.write(f"**โทนความรู้สึกรวม:** {analyze_sentiment_thai(text)}")
+                st.subheader("🔍 ผลการวิเคราะห์")
+                st.write(f"**อารมณ์:** {s_label}")
                 
-                try:
-                    brief = summarize(text, n=2)
-                    st.write("**สรุปเนื้อหา:**")
-                    for b in brief: st.write(f"📌 {b}")
-                except:
-                    st.write("**สรุปเนื้อหา:** ไม่สามารถสรุปได้")
-
-                st.write("**Word Cloud (ยาว >= 5 ตัวอักษร และ ซ้ำ >= 3 ครั้ง):**")
+                # --- ส่วน Word Cloud และปุ่มดาวน์โหลดรูป ---
                 if filtered_final:
-                    try:
-                        wc = WordCloud(
-                            width=800, height=400, 
-                            background_color="white", 
-                            regexp=r"[\u0e00-\u0e7f]+",
-                            font_path=font_path
-                        ).generate(" ".join(filtered_final))
-                        
-                        fig_wc, ax_wc = plt.subplots()
-                        ax_wc.imshow(wc, interpolation='bilinear')
-                        ax_wc.axis("off")
-                        st.pyplot(fig_wc)
-                    except:
-                        st.write("⚠️ ไม่สามารถสร้าง Word Cloud ได้")
-                else:
-                    st.warning("⚠️ ไม่พบคำที่ตรงตามเงื่อนไข (ยาว >= 5 และ ซ้ำ >= 3)")
-
+                    wc = WordCloud(width=800, height=400, background_color="white", regexp=r"[\u0e00-\u0e7f]+", font_path=font_path).generate(" ".join(filtered_final))
+                    fig, ax = plt.subplots()
+                    ax.imshow(wc, interpolation='bilinear')
+                    ax.axis("off")
+                    st.pyplot(fig)
+                    
+                    # ปุ่มดาวน์โหลด PNG
+                    buf = BytesIO()
+                    fig.savefig(buf, format="png")
+                    st.download_button(label="💾 ดาวน์โหลด Word Cloud (PNG)", data=buf.getvalue(), file_name=f"wordcloud_{file.name}.png", mime="image/png")
+                
             with col2:
-                st.subheader("📈 สถิติคำสำคัญ")
-                # แสดงผลคำที่ซ้ำสูงสุด 12 อันดับแรกจากรายการที่กรองแล้ว
+                st.subheader("📈 สถิติคำ")
                 final_counts = Counter(filtered_final).most_common(12)
-                if final_counts:
-                    df_counts = pd.DataFrame(final_counts, columns=['คำ', 'จำนวนครั้ง'])
-                    st.bar_chart(df_counts.set_index('คำ'))
-                    st.table(df_counts)
-                else:
-                    st.write("ไม่พบข้อมูลที่ตรงตามเงื่อนไข")
+                df_counts = pd.DataFrame(final_counts, columns=['คำ', 'จำนวนครั้ง'])
+                st.table(df_counts)
+                
+                # --- ปุ่มดาวน์โหลดรายงาน Word ---
+                word_data = create_word_report(file.name, s_label, brief, df_counts)
+                st.download_button(label="📄 ดาวน์โหลดรายงาน (MS Word)", data=word_data, file_name=f"report_{file.name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-            comparison_data.append({"ไฟล์": file.name, "ความรู้สึก": analyze_sentiment_thai(text)})
-
-    st.divider()
-    st.subheader("📋 ตารางสรุปเปรียบเทียบระหว่างเคส")
-    st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
 else:
-    st.info("กรุณาอัปโหลดไฟล์เพื่อเริ่มการวิเคราะห์")
+    st.info("กรุณาอัปโหลดไฟล์")
