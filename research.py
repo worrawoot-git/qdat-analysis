@@ -1,117 +1,82 @@
 import streamlit as st
-from pythainlp.summarize import summarize
-from pythainlp.tokenize import word_tokenize
-from pythainlp.corpus import thai_stopwords
-from pythainlp.sentiment import sentiment
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 from collections import Counter
 import re
 
-# ตั้งค่าหน้าจอ
-st.set_page_config(layout="wide", page_title="Advanced Thai Research Tool")
+# นำเข้า Library ภาษาไทยแบบปลอดภัย
+try:
+    from pythainlp.summarize import summarize
+    from pythainlp.tokenize import word_tokenize
+    from pythainlp.corpus import thai_stopwords
+    from pythainlp import sentiment
+    THAI_READY = True
+except ImportError:
+    THAI_READY = False
 
-# ส่วนหัวโปรแกรม
-st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Advanced Version)")
+from wordcloud import WordCloud
+
+st.set_page_config(layout="wide", page_title="Thai Research Tool")
+
+st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์ (Stable Version)")
 st.markdown("---")
 
-# ส่วนอัปโหลดไฟล์ (รองรับหลายไฟล์)
-uploaded_files = st.file_uploader("เลือกไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
+if not THAI_READY:
+    st.error("❌ พบข้อผิดพลาดในการติดตั้ง Library ภาษาไทย กรุณาเช็กไฟล์ requirements.txt")
+    st.stop()
+
+uploaded_files = st.file_uploader("อัปโหลดไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
 
 if uploaded_files:
-    # สำหรับเก็บข้อมูลสรุปเพื่อทำตารางเปรียบเทียบตอนท้าย
-    summary_data = []
-
+    summary_list = []
     for file in uploaded_files:
-        # อ่านข้อความจากไฟล์
         text = file.read().decode("utf-8")
         
-        # เตรียมข้อมูลสำหรับการแสดงผลรายไฟล์
-        with st.expander(f"📋 ผลการวิเคราะห์ไฟล์: {file.name}", expanded=True):
-            col1, col2 = st.columns([1, 1])
+        with st.expander(f"📑 ไฟล์: {file.name}", expanded=True):
+            col1, col2 = st.columns(2)
             
-            # การประมวลผลคำ (Tokenization)
+            # การตัดคำและจัดการ Stopwords
             tokens = word_tokenize(text, keep_whitespace=False)
-            stopwords = list(thai_stopwords())
-            filtered_words = [t for t in tokens if t not in stopwords and len(t) > 1 and not re.match(r'[0-9]+', t)]
+            stop_words = list(thai_stopwords())
+            filtered = [t for t in tokens if t not in stop_words and len(t) > 1 and not re.match(r'[0-9]+', t)]
             
             with col1:
-                st.subheader("🔍 ข้อมูลเบื้องต้น")
-                
-                # 1. วิเคราะห์อารมณ์ (Sentiment)
+                # วิเคราะห์อารมณ์แบบป้องกันการล่ม
+                st.subheader("💡 การวิเคราะห์ใจความ")
                 try:
-                    sent_res = sentiment(text)
-                    if sent_res == "pos":
-                        sent_display = "บวก (Positive) 😊"
-                    elif sent_res == "neg":
-                        sent_display = "ลบ (Negative) 😟"
-                    else:
-                        sent_display = "ปกติ (Neutral) 😐"
+                    s_val = sentiment(text)
+                    s_label = "บวก 😊" if s_val == "pos" else "ลบ 😟" if s_val == "neg" else "ปกติ 😐"
                 except:
-                    sent_display = "ไม่สามารถวิเคราะห์ได้"
+                    s_label = "ไม่สามารถวิเคราะห์ได้"
                 
-                st.write(f"**โทนความรู้สึก:** {sent_display}")
+                st.write(f"**ความรู้สึกรวม:** {s_label}")
                 
-                # 2. สรุปใจความสำคัญ (Summary)
                 st.write("**สรุปเนื้อหา:**")
                 try:
                     brief = summarize(text, n=2)
-                    for b in brief:
-                        st.write(f"📌 {b}")
-                except:
-                    st.write("- ไม่สามารถสรุปได้เนื่องจากเนื้อหาสั้นเกินไป")
+                    for b in brief: st.write(f"📌 {b}")
+                except: st.write("- เนื้อหาสั้นเกินไปสำหรับการสรุป")
 
-                # 3. สร้าง Word Cloud
                 st.write("**Word Cloud:**")
                 try:
-                    # ใช้ RegExp เพื่อให้รองรับภาษาไทย
-                    wc = WordCloud(
-                        width=800, 
-                        height=400, 
-                        background_color="white", 
-                        regexp=r"[\u0e00-\u0e7f]+",
-                        colormap='viridis'
-                    ).generate(" ".join(filtered_words))
-                    
+                    wc = WordCloud(width=800, height=400, background_color="white", regexp=r"[\u0e00-\u0e7f]+").generate(" ".join(filtered))
                     fig, ax = plt.subplots()
-                    ax.imshow(wc, interpolation='bilinear')
+                    ax.imshow(wc)
                     ax.axis("off")
                     st.pyplot(fig)
-                except:
-                    st.error("ไม่สามารถสร้าง Word Cloud ได้")
+                except: st.write("⚠️ ไม่สามารถสร้าง Word Cloud ได้")
 
             with col2:
-                st.subheader("📊 สถิติคำสำคัญ")
-                # นับคำสำคัญ
-                word_counts = Counter(filtered_words).most_common(12)
-                df_words = pd.DataFrame(word_counts, columns=['คำ', 'จำนวนครั้ง'])
-                
-                # แสดงเป็นกราฟแท่ง
-                st.bar_chart(df_words.set_index('คำ'))
-                
-                # แสดงเป็นตาราง
-                st.table(df_words)
+                st.subheader("📊 สถิติคำ")
+                counts = Counter(filtered).most_common(12)
+                df = pd.DataFrame(counts, columns=['คำ', 'จำนวน'])
+                st.bar_chart(df.set_index('คำ'))
+                st.table(df)
 
-        # เก็บข้อมูลไว้ทำตารางเปรียบเทียบล่างสุด
-        summary_data.append({
-            "ชื่อไฟล์": file.name,
-            "ความรู้สึก": sent_display,
-            "คำที่พบบ่อย": ", ".join([w[0] for w in word_counts[:3]])
-        })
+            summary_list.append({"ไฟล์": file.name, "ความรู้สึก": s_label})
 
-    # ส่วนตารางเปรียบเทียบรวม (Cross-Case Table)
-    st.markdown("---")
-    st.subheader("📑 ตารางสรุปการเปรียบเทียบระหว่างเคส (Case Comparison Table)")
-    final_df = pd.DataFrame(summary_data)
-    st.dataframe(final_df, use_container_width=True)
-
+    st.divider()
+    st.subheader("📋 ตารางเปรียบเทียบเคส")
+    st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
 else:
-    # หน้าจอตอนยังไม่ได้อัปโหลด
-    st.info("กรุณาอัปโหลดไฟล์บทสัมภาษณ์ตั้งแต่ 1 ไฟล์ขึ้นไปทางแถบซ้ายมือ หรือคลิก Browse files")
-    
-    # คำแนะนำเล็กน้อย
-    with st.expander("💡 คำแนะนำการใช้งาน"):
-        st.write("1. เตรียมไฟล์บทสัมภาษณ์เป็นนามสกุล .txt")
-        st.write("2. สามารถลากไฟล์หลายๆ ไฟล์มาวางพร้อมกันได้")
-        st.write("3. คุณสามารถบันทึกกราฟหรือ Word Cloud ได้โดยการคลิกขวาที่รูปแล้วเลือก 'Save Image'")
+    st.info("กรุณาอัปโหลดไฟล์ที่แถบด้านบน")
