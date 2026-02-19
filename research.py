@@ -4,104 +4,138 @@ import matplotlib.pyplot as plt
 from collections import Counter
 import re
 import matplotlib as mpl
+from wordcloud import WordCloud
 
-# --- 1. ตั้งค่าฟอนต์ (ต้องชื่อตรงกับบน GitHub) ---
-font_path = "Kanit-Regular.ttf"
+# --- 1. ตั้งค่าการแสดงผลภาษาไทย (Font Configuration) ---
+font_path = "Kanit-Regular.ttf" 
 
-# ฟังก์ชันตั้งค่าฟอนต์ภาษาไทยแบบบังคับ
-def set_thai_font():
+def setup_font():
     try:
         mpl.font_manager.fontManager.addfont(font_path)
         prop = mpl.font_manager.FontProperties(fname=font_path)
         mpl.rc('font', family=prop.get_name())
-        mpl.rcParams['axes.unicode_minus'] = False
+        mpl.rcParams['axes.unicode_minus'] = False 
         return True
     except:
         return False
 
-# --- 2. การนำเข้า Library แบบยืดหยุ่น ---
-try:
-    import pythainlp
-    from pythainlp.tokenize import word_tokenize
-    from pythainlp.corpus import thai_stopwords
-    from pythainlp.summarize import summarize
-    # ลองโหลด sentiment แยกต่างหาก
+# --- 2. ฟังก์ชันวิเคราะห์อารมณ์แบบผสมผสาน (Hybrid Sentiment) ---
+def analyze_sentiment_thai(text):
+    # พยายามใช้ AI จาก Library ก่อน
     try:
         from pythainlp.sentiment import sentiment
+        res = sentiment(text)
+        if res == "pos": return "บวก (Positive) 😊"
+        if res == "neg": return "ลบ (Negative) 😟"
     except:
-        sentiment = None
-    THAI_READY = True
-except Exception as e:
-    THAI_READY = False
-    error_msg = str(e)
+        pass
 
-# --- 3. ส่วนแสดงผล UI ---
-st.set_page_config(layout="wide", page_title="Thai Research Tool")
-st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์ (Stable Version)")
+    # ระบบสำรอง: เช็กจากคำสำคัญ (Rule-based)
+    pos_words = ['ดี', 'เห็นด้วย', 'ภูมิใจ', 'สำเร็จ', 'ความสุข', 'พัฒนา', 'ประโยชน์', 'ยั่งยืน', 'พอเพียง', 'ประหยัด']
+    neg_words = ['ไม่ดี', 'ปัญหา', 'แย่', 'ยากลำบาก', 'ขาดแคลน', 'อุปสรรค', 'หนี้สิน', 'เดือดร้อน', 'เสียดาย']
+    
+    pos_score = sum(1 for w in pos_words if w in text)
+    neg_score = sum(1 for w in neg_words if w in text)
+    
+    if pos_score > neg_score: return "ค่อนไปทางบวก 😊"
+    elif neg_score > pos_score: return "ค่อนไปทางลบ 😟"
+    else: return "ปกติ / เป็นกลาง 😐"
+
+# --- 3. การนำเข้า Library ภาษาไทย ---
+try:
+    from pythainlp.summarize import summarize
+    from pythainlp.tokenize import word_tokenize
+    from pythainlp.corpus import thai_stopwords
+    THAI_READY = True
+except ImportError:
+    THAI_READY = False
+
+# --- 4. ส่วนการแสดงผลบนหน้าเว็บ (UI) ---
+st.set_page_config(layout="wide", page_title="Professional Thai Research Tool")
+
+st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Complete Version)")
+st.write("ฟีเจอร์: กรองคำที่พบน้อยออก | Word Cloud ภาษาไทย | วิเคราะห์อารมณ์ | สรุปความ")
 
 if not THAI_READY:
-    st.error(f"❌ ระบบยังโหลด Library ไม่ครบ: {error_msg}")
-    st.info("กรุณากด 'Reboot App' ที่เมนู Manage App ด้านขวาล่าง")
+    st.error("❌ พบข้อผิดพลาดในการโหลด Library ภาษาไทย")
     st.stop()
 
-# เรียกใช้ฟังก์ชันตั้งค่าฟอนต์
-font_is_ready = set_thai_font()
+setup_font()
 
 uploaded_files = st.file_uploader("อัปโหลดไฟล์บทสัมภาษณ์ (.txt)", type=['txt'], accept_multiple_files=True)
 
 if uploaded_files:
-    summary_list = []
+    comparison_data = []
+    
     for file in uploaded_files:
         text = file.read().decode("utf-8")
         
-        with st.expander(f"📑 วิเคราะห์: {file.name}", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            # ตัดคำและลบคำฟุ่มเฟือย
-            tokens = word_tokenize(text, keep_whitespace=False)
-            stop_words = list(thai_stopwords())
-            filtered = [t for t in tokens if t not in stop_words and len(t) > 1 and not re.match(r'[0-9]+', t)]
+        # ตัดคำและกรองคำฟุ่มเฟือย
+        tokens = word_tokenize(text, keep_whitespace=False)
+        stop_words = list(thai_stopwords())
+        # เพิ่มคำฟุ่มเฟือยทั่วไปที่มักหลุดมา
+        extra_stop = ['มี', 'การ', 'และ', 'ให้', 'ได้', 'ที่', 'ใน', 'ของ', 'เป็น', 'ก็', 'จะ', 'ไป', 'มา']
+        stop_words.extend(extra_stop)
+        
+        filtered_all = [t for t in tokens if t not in stop_words and len(t) > 1 and not re.match(r'[0-9]+', t)]
+        
+        # --- กรองเฉพาะคำที่มีความถี่ตั้งแต่ 5 ครั้งขึ้นไป ---
+        word_counts_full = Counter(filtered_all)
+        filtered_top = [word for word in filtered_all if word_counts_full[word] >= 5]
+        
+        with st.expander(f"📊 ผลการวิเคราะห์: {file.name}", expanded=True):
+            col1, col2 = st.columns([1, 1])
             
             with col1:
-                st.subheader("💡 ผลการวิเคราะห์")
+                st.subheader("🔍 สรุปข้อมูล")
                 
                 # วิเคราะห์อารมณ์
-                s_label = "ไม่รองรับ"
-                if sentiment:
-                    try:
-                        res = sentiment(text)
-                        s_label = "บวก 😊" if res == "pos" else "ลบ 😟" if res == "neg" else "ปกติ 😐"
-                    except: pass
-                st.write(f"**โทนความรู้สึก:** {s_label}")
+                s_label = analyze_sentiment_thai(text)
+                st.write(f"**โทนความรู้สึกรวม:** {s_label}")
                 
-                # สรุปความ
-                st.write("**สรุปเนื้อหา:**")
+                # สรุปใจความ
                 try:
                     brief = summarize(text, n=2)
+                    st.write("**สรุปเนื้อหา:**")
                     for b in brief: st.write(f"📌 {b}")
-                except: st.write("- เนื้อหาสั้นเกินไป")
+                except:
+                    st.write("**สรุปเนื้อหา:** ไม่สามารถสรุปได้")
 
-                # Word Cloud
-                from wordcloud import WordCloud
-                try:
-                    wc = WordCloud(width=800, height=400, background_color="white", 
-                                  regexp=r"[\u0e00-\u0e7f]+", font_path=font_path).generate(" ".join(filtered))
-                    fig, ax = plt.subplots()
-                    ax.imshow(wc)
-                    ax.axis("off")
-                    st.pyplot(fig)
-                except: st.write("⚠️ Word Cloud ยังไม่พร้อม (เช็กไฟล์ฟอนต์)")
+                # Word Cloud (ใช้เฉพาะคำที่ผ่านการกรองความถี่ >= 5)
+                st.write("**Word Cloud (เฉพาะคำที่พบ >= 5 ครั้ง):**")
+                if filtered_top:
+                    try:
+                        wc = WordCloud(
+                            width=800, height=400, 
+                            background_color="white", 
+                            regexp=r"[\u0e00-\u0e7f]+",
+                            font_path=font_path
+                        ).generate(" ".join(filtered_top))
+                        
+                        fig_wc, ax_wc = plt.subplots()
+                        ax_wc.imshow(wc, interpolation='bilinear')
+                        ax_wc.axis("off")
+                        st.pyplot(fig_wc)
+                    except:
+                        st.write("⚠️ ไม่สามารถสร้าง Word Cloud ได้")
+                else:
+                    st.warning("⚠️ ไม่มีคำใดที่ปรากฏซ้ำเกิน 5 ครั้งในไฟล์นี้")
 
             with col2:
-                st.subheader("📊 สถิติคำ")
-                counts = Counter(filtered).most_common(12)
-                df = pd.DataFrame(counts, columns=['คำ', 'จำนวน'])
-                if not df.empty:
-                    st.bar_chart(df.set_index('คำ'))
-                    st.table(df)
+                st.subheader("📈 สถิติคำสำคัญ (Top Keywords)")
+                counts = Counter(filtered_top).most_common(12)
+                if counts:
+                    df_counts = pd.DataFrame(counts, columns=['คำ', 'จำนวนครั้ง'])
+                    st.bar_chart(df_counts.set_index('คำ'))
+                    st.table(df_counts)
+                else:
+                    st.write("ไม่พบข้อมูลคำที่ซ้ำกันเกิน 5 ครั้ง")
 
-            summary_list.append({"ไฟล์": file.name, "อารมณ์": s_label})
+            comparison_data.append({"ไฟล์": file.name, "ความรู้สึก": s_label})
 
     st.divider()
-    st.subheader("📋 สรุปเปรียบเทียบ")
-    st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
+    st.subheader("📋 สรุปเปรียบเทียบระหว่างเคส")
+    st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+
+else:
+    st.info("กรุณาอัปโหลดไฟล์เพื่อเริ่มการวิเคราะห์")
