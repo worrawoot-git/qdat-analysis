@@ -49,7 +49,7 @@ except ImportError:
     THAI_READY = False
 
 st.set_page_config(layout="wide", page_title="Professional Thai Research Tool")
-st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Complete Edition)")
+st.title("📂 ระบบวิเคราะห์บทสัมภาษณ์งานวิจัย (Custom Filter Edition)")
 
 if not THAI_READY:
     st.error("❌ พบข้อผิดพลาดในการโหลด Library ภาษาไทย")
@@ -65,21 +65,21 @@ if uploaded_files:
     for file in uploaded_files:
         text = file.read().decode("utf-8")
         
-        # --- ขั้นตอนการตัดคำและกรองช่องว่าง (จุดที่แก้ไข) ---
+        # ตัดคำ
         tokens = word_tokenize(text, keep_whitespace=False)
         stop_words = list(thai_stopwords())
-        extra_stop = ['มี', 'การ', 'และ', 'ให้', 'ได้', 'ที่', 'ใน', 'ของ', 'เป็น', 'ก็', 'จะ', 'ไป', 'มา', 'เนาะ', 'นะ', 'ครับ', 'ค่ะ']
+        extra_stop = ['เนาะ', 'นะ', 'ครับ', 'ค่ะ', 'อืม', 'เอ่อ']
         stop_words.extend(extra_stop)
         
-        # กรองคำ: ต้องไม่ใช่ stopwords, ไม่ใช่ช่องว่าง, ความยาว > 1 และไม่ใช่อักขระพิเศษ
-        filtered_all = [
+        # --- เงื่อนไขใหม่: เลือกคำที่ยาวตั้งแต่ 5 ตัวอักษรขึ้นไป และไม่ใช่ตัวเลข/สัญลักษณ์ ---
+        filtered_by_length = [
             t.strip() for t in tokens 
-            if t.strip() and t not in stop_words and len(t.strip()) > 1 and not re.match(r'^[0-9\W]+$', t)
+            if t.strip() and t not in stop_words and len(t.strip()) >= 5 and not re.match(r'^[0-9\W]+$', t)
         ]
         
-        # กรองความถี่ตั้งแต่ 5 ครั้งขึ้นไป
-        word_counts_full = Counter(filtered_all)
-        filtered_top = [word for word in filtered_all if word_counts_full[word] >= 5]
+        # --- เงื่อนไขใหม่: นับความถี่และเลือกคำที่ซ้ำตั้งแต่ 3 ครั้งขึ้นไป ---
+        word_counts_full = Counter(filtered_by_length)
+        filtered_final = [word for word in filtered_by_length if word_counts_full[word] >= 3]
         
         with st.expander(f"📊 ผลการวิเคราะห์: {file.name}", expanded=True):
             col1, col2 = st.columns([1, 1])
@@ -95,15 +95,15 @@ if uploaded_files:
                 except:
                     st.write("**สรุปเนื้อหา:** ไม่สามารถสรุปได้")
 
-                st.write("**Word Cloud (ความถี่ >= 5 ครั้ง):**")
-                if filtered_top:
+                st.write("**Word Cloud (ยาว >= 5 ตัวอักษร และ ซ้ำ >= 3 ครั้ง):**")
+                if filtered_final:
                     try:
-                        wc = Cloud = WordCloud(
+                        wc = WordCloud(
                             width=800, height=400, 
                             background_color="white", 
                             regexp=r"[\u0e00-\u0e7f]+",
                             font_path=font_path
-                        ).generate(" ".join(filtered_top))
+                        ).generate(" ".join(filtered_final))
                         
                         fig_wc, ax_wc = plt.subplots()
                         ax_wc.imshow(wc, interpolation='bilinear')
@@ -112,20 +112,18 @@ if uploaded_files:
                     except:
                         st.write("⚠️ ไม่สามารถสร้าง Word Cloud ได้")
                 else:
-                    st.warning("⚠️ ไม่มีคำใดที่ปรากฏซ้ำเกิน 5 ครั้ง")
+                    st.warning("⚠️ ไม่พบคำที่ตรงตามเงื่อนไข (ยาว >= 5 และ ซ้ำ >= 3)")
 
             with col2:
                 st.subheader("📈 สถิติคำสำคัญ")
-                counts = Counter(filtered_top).most_common(12)
-                if counts:
-                    df_counts = pd.DataFrame(counts, columns=['คำ', 'จำนวนครั้ง'])
-                    # กรองแถวที่ 'คำ' เป็นค่าว่างออกอีกชั้นเพื่อความชัวร์
-                    df_counts = df_counts[df_counts['คำ'].str.strip() != ""]
-                    
+                # แสดงผลคำที่ซ้ำสูงสุด 12 อันดับแรกจากรายการที่กรองแล้ว
+                final_counts = Counter(filtered_final).most_common(12)
+                if final_counts:
+                    df_counts = pd.DataFrame(final_counts, columns=['คำ', 'จำนวนครั้ง'])
                     st.bar_chart(df_counts.set_index('คำ'))
                     st.table(df_counts)
                 else:
-                    st.write("ไม่พบข้อมูลคำที่ซ้ำกันเกิน 5 ครั้ง")
+                    st.write("ไม่พบข้อมูลที่ตรงตามเงื่อนไข")
 
             comparison_data.append({"ไฟล์": file.name, "ความรู้สึก": analyze_sentiment_thai(text)})
 
