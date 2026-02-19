@@ -50,11 +50,13 @@ def plot_network(words, font_prop):
     for pair, weight in pair_counts:
         G.add_edge(pair[0], pair[1], weight=weight)
     if len(G.nodes) == 0: return None
+    
     fig, ax = plt.subplots(figsize=(10, 7))
     pos = nx.spring_layout(G, k=0.5, seed=42)
     weights = [G[u][v]['weight'] for u, v in G.edges()]
     nx.draw_networkx_edges(G, pos, width=weights, edge_color='skyblue', alpha=0.5)
     nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='orange', alpha=0.8)
+    
     for node, (x, y) in pos.items():
         ax.text(x, y, node, fontproperties=font_prop, fontsize=14, ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
     plt.axis('off')
@@ -69,7 +71,7 @@ except:
     THAI_READY = False
 
 st.set_page_config(layout="wide", page_title="Full Advanced Research Tool")
-st.title("🕸️ ระบบวิเคราะห์งานวิจัย (Full Export Edition)")
+st.title("🕸️ ระบบวิเคราะห์งานวิจัย (Complete Export Edition)")
 
 if not THAI_READY:
     st.error("❌ Library ไม่พร้อมใช้งาน")
@@ -105,31 +107,39 @@ if uploaded_files:
                         ax_wc.imshow(wc)
                         ax_wc.axis("off")
                         st.pyplot(fig_wc)
+                        
+                        # ปุ่มโหลด Word Cloud PNG
                         buf_wc = BytesIO()
                         fig_wc.savefig(buf_wc, format="png")
-                        st.download_button(label="💾 โหลด Word Cloud (PNG)", data=buf_wc.getvalue(), file_name=f"cloud_{file.name}.png", mime="image/png")
+                        st.download_button(label="💾 โหลดรูป Word Cloud (PNG)", data=buf_wc.getvalue(), file_name=f"cloud_{file.name}.png", mime="image/png")
                 with c2:
                     st.subheader("📈 ตารางสถิติคำ")
                     df_counts = pd.DataFrame(Counter(filtered_final).most_common(12), columns=['คำ', 'จำนวนครั้ง'])
                     st.table(df_counts)
-                    # ปุ่ม Excel จุดที่ 1
-                    st.download_button(label="🟢 โหลดตารางสถิตินี้ (Excel)", data=to_excel(df_counts), file_name=f"stats_{file.name}.xlsx")
+                    st.download_button(label="🟢 โหลดสถิตินี้ (Excel)", data=to_excel(df_counts), file_name=f"stats_{file.name}.xlsx")
 
             with tab2:
+                st.subheader("โหนดความสัมพันธ์ของคำสำคัญ")
                 if len(filtered_words) > 5:
                     fig_net = plot_network(filtered_words, font_p)
-                    if fig_net: st.pyplot(fig_net)
-                else: st.warning("ข้อมูลน้อยเกินไป")
+                    if fig_net:
+                        st.pyplot(fig_net)
+                        
+                        # --- ปุ่มโหลด Network Analysis PNG กลับมาแล้ว ---
+                        buf_net = BytesIO()
+                        fig_net.savefig(buf_net, format="png")
+                        st.download_button(label="💾 ดาวน์โหลดรูปโครงข่าย (PNG)", data=buf_net.getvalue(), file_name=f"network_{file.name}.png", mime="image/png")
+                else: 
+                    st.warning("ข้อมูลน้อยเกินไป")
 
             with tab3:
                 sentences = text.split('\n')
                 st.info("\n\n".join([s for s in sentences if s.strip()][:5]))
                 st.text_area("ข้อความทั้งหมด", value=text, height=200)
 
-    # --- ส่วนสุดท้าย: ตารางเปรียบเทียบรวมพร้อมปุ่มโหลด Excel ---
+    # --- ส่วนตารางเปรียบเทียบรวม ---
     st.divider()
     st.subheader("📋 ตารางสรุปเปรียบเทียบทุกเคส")
     df_compare = pd.DataFrame(comparison_list)
     st.table(df_compare)
-    # ปุ่ม Excel จุดที่ 2
     st.download_button(label="🟢 ดาวน์โหลดตารางสรุปทั้งหมด (Excel)", data=to_excel(df_compare), file_name="total_summary.xlsx")
