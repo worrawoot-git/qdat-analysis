@@ -1,5 +1,6 @@
 streamlit
 pythainlp
-pandas
-matplotlib
 wordcloud
+matplotlib
+pandas
+python-docx
